@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>İstanbul Minibüs – Yeni Hat/Durak Talep Haritası</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    
+    <style>
+        :root {
+            --bg-color: #0b0b0b;
+            --panel-bg: rgba(20, 20, 20, 0.8);
+            --accent-blue: #00d2ff;
+            --accent-purple: #9d50bb;
+            --text-color: #ffffff;
+            --border-style: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        body { margin: 0; background: var(--bg-color); color: var(--text-color); font-family: 'Inter', sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; cursor: crosshair; }
+
+        #panel {
+            position: absolute; top: 20px; left: 20px; width: 320px;
+            max-height: 90vh; background: var(--panel-bg); 
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            padding: 24px; border-radius: 20px; z-index: 1000; 
+            box-shadow: 0 8px 32px rgba(0,0,0,0.8); border: var(--border-style);
+            display: flex; flex-direction: column; gap: 15px; overflow-y: auto;
+        }
+
+        h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--accent-blue); }
+        p { font-size: 13px; color: #aaa; margin: 0; line-height: 1.5; }
+
+        .input-group { display: flex; flex-direction: column; gap: 8px; }
+        label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: #888; }
+
+        input, select {
+            background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px; padding: 10px; color: #fff; font-family: inherit;
+        }
+
+        button {
+            background: linear-gradient(135deg, var(--accent-blue) 0%, #3a7bd5 100%);
+            color: #000; border: none; padding: 12px; border-radius: 8px;
+            font-weight: 700; cursor: pointer; transition: 0.3s;
+            text-transform: uppercase; font-size: 11px;
+        }
+
+        button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 210, 255, 0.3); }
+
+        .talep-liste { margin-top: 10px; font-size: 12px; }
+        .talep-item { 
+            padding: 10px; border-bottom: var(--border-style); 
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .delete-btn { color: var(--accent-red); cursor: pointer; font-weight: bold; padding: 5px; }
+
+        /* Navigation link */
+        .nav-link {
+            font-size: 11px; color: var(--accent-blue); text-decoration: none;
+            text-align: center; margin-top: 10px; opacity: 0.7;
+        }
+        .nav-link:hover { opacity: 1; text-decoration: underline; }
+
+        /* MOBİL UYUMLULUK */
+        @media (max-width: 768px) {
+            #panel {
+                top: auto; bottom: 0; left: 0; width: 100%;
+                max-height: 50vh; border-radius: 20px 20px 0 0;
+                padding: 15px; gap: 10px;
+            }
+            #mobileToggle {
+                display: block !important; position: absolute; top: -40px; left: 50%;
+                transform: translateX(-50%); background: var(--panel-bg);
+                backdrop-filter: blur(10px); border: var(--border-style);
+                padding: 5px 20px; border-radius: 10px 10px 0 0;
+                color: #fff; font-size: 12px; cursor: pointer;
+            }
+        }
+        #mobileToggle { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="panel">
+    <div id="mobileToggle" onclick="togglePanel()">Paneli Gizle/Aç</div>
+    <h2>Talep Toplama Merkezi</h2>
+    <p>Haritada istediğiniz bir noktaya tıklayarak yeni bir minibüs durağı veya hattı talep edebilirsiniz.</p>
+    
+    <a href="../" class="nav-link">← Sorun Analiz Haritasına Dön</a>
+
+    <hr style="border: 0; border-top: var(--border-style);">
+
+    <div id="addDemandForm" style="display: none;">
+        <div class="input-group">
+            <label>Talep Türü</label>
+            <select id="talepTuru">
+                <option value="Durak Talebi">Yeni Durak</option>
+                <option value="Hat Talebi">Yeni Hat Güzergahı</option>
+                <option value="Ek Sefer">Sefer Artışı</option>
+            </select>
+        </div>
+        <div class="input-group">
+            <label>Notunuz</label>
+            <input type="text" id="talepNot" placeholder="Neden burası?">
+        </div>
+        <button onclick="talepKaydet()">Talebi Gönder</button>
+    </div>
+
+    <div id="clickHint">
+        <p style="text-align: center; padding: 15px; border: 1px dashed #444; border-radius: 10px;">
+            Talep oluşturmak için haritada bir yere tıklayın.
+        </p>
+    </div>
+
+    <div class="talep-liste">
+        <label>Son Talepleriniz</label>
+        <div id="talepContainer"></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../minibus_data.js"></script>
+
+<script>
+    var map = L.map('map', { zoomControl: false }).setView([41.01, 28.97], 11);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        attribution: "&copy; CartoDB"
+    }).addTo(map);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    var hatLayer = null;
+    var tempMarker = null;
+    var talepler = JSON.parse(localStorage.getItem('minibus_talepler') || '[]');
+    var markerLayer = L.layerGroup().addTo(map);
+
+    function togglePanel() {
+        var p = document.getElementById('panel');
+        if (p.style.bottom === "0px" || p.style.bottom === "") {
+            p.style.bottom = "-45vh";
+        } else {
+            p.style.bottom = "0px";
+        }
+    }
+
+    // Hatları yükle (Sadece görsel amaçlı beyaz çizgiler)
+    function verileriYukle() {
+        if (!window.minibusData) return;
+        hatLayer = L.geoJSON(window.minibusData, {
+            style: { color: "#ffffff", weight: 2, opacity: 0.3 }
+        }).addTo(map);
+        talepleriGoster();
+    }
+
+    // Haritaya tıklama olayı
+    map.on('click', function(e) {
+        if (tempMarker) map.removeLayer(tempMarker);
+        
+        tempMarker = L.marker(e.latlng).addTo(map);
+        document.getElementById('addDemandForm').style.display = 'flex';
+        document.getElementById('clickHint').style.display = 'none';
+        document.getElementById('addDemandForm').dataset.latlng = JSON.stringify(e.latlng);
+    });
+
+    function talepKaydet() {
+        var tur = document.getElementById('talepTuru').value;
+        var not = document.getElementById('talepNot').value;
+        var latlng = JSON.parse(document.getElementById('addDemandForm').dataset.latlng);
+
+        var yeniTalep = {
+            id: Date.now(),
+            tur: tur,
+            not: not,
+            latlng: latlng
+        };
+
+        talepler.push(yeniTalep);
+        localStorage.setItem('minibus_talepler', JSON.stringify(talepler));
+        
+        map.removeLayer(tempMarker);
+        document.getElementById('addDemandForm').style.display = 'none';
+        document.getElementById('clickHint').style.display = 'block';
+        document.getElementById('talepNot').value = "";
+        
+        talepleriGoster();
+        alert("Talebiniz başarıyla kaydedildi.");
+    }
+
+    function talepleriGoster() {
+        markerLayer.clearLayers();
+        var container = document.getElementById('talepContainer');
+        container.innerHTML = "";
+
+        talepler.forEach(t => {
+            // Haritaya ekle
+            L.circleMarker(t.latlng, {
+                radius: 8,
+                fillColor: "#00d2ff",
+                color: "#fff",
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(markerLayer).bindPopup(`<b>${t.tur}</b><br>${t.not}`);
+
+            // Listeye ekle
+            var div = document.createElement("div");
+            div.className = "talep-item";
+            div.innerHTML = `<div><b>${t.tur}</b><br><span style="color:#888">${t.not || ""}</span></div>
+                             <span class="delete-btn" onclick="talepSil(${t.id})">×</span>`;
+            container.appendChild(div);
+        });
+    }
+
+    function talepSil(id) {
+        talepler = talepler.filter(t => t.id !== id);
+        localStorage.setItem('minibus_talepler', JSON.stringify(talepler));
+        talepleriGoster();
+    }
+
+    window.onload = verileriYukle;
+</script>
+</body>
+</html>
